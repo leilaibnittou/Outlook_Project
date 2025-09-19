@@ -1,0 +1,135 @@
+from msal import PublicClientApplication
+import requests
+
+# -------------------------------
+# Configuration Azure
+# -------------------------------
+CLIENT_ID = "0f9136a2-194d-458f-8044-55854a40f5f0"
+TENANT_ID = "common"
+REDIRECT_URI = "http://localhost"
+SCOPES = ["Mail.ReadWrite"]
+
+# -------------------------------
+# Authentification avec MSAL
+# -------------------------------
+app = PublicClientApplication(
+    client_id=CLIENT_ID,
+    authority=f"https://login.microsoftonline.com/{TENANT_ID}"
+)
+
+accounts = app.get_accounts()
+result = app.acquire_token_silent(SCOPES, account=accounts[0]) if accounts else None
+
+if not result:
+    print("Connexion nécessaire, ouverture du navigateur...")
+    result = app.acquire_token_interactive(scopes=SCOPES)
+
+if "access_token" not in result:
+    print("Échec de la connexion :", result.get("error_description"))
+    exit()
+
+token = result["access_token"]
+print("✅ Connexion réussie !")
+
+headers = {
+    "Authorization": f"Bearer {token}",
+    "Accept": "application/json",
+    "Content-Type": "application/json"
+}
+
+# -------------------------------
+# Récupération de tous les dossiers
+# -------------------------------
+def get_all_folders():
+    url = "https://graph.microsoft.com/v1.0/me/mailFolders?$top=100"
+    all_folders = []
+    while url:
+        resp = requests.get(url, headers=headers).json()
+        all_folders.extend(resp.get("value", []))
+        url = resp.get("@odata.nextLink")
+    return all_folders
+
+target_folders = ["P1", "P2", "P3", "P4"]
+folders = get_all_folders()
+folder_ids = {}
+
+# Créer les dossiers uniquement s’ils n’existent pas
+for f in target_folders:
+    existing = next((x for x in folders if x["displayName"].lower() == f.lower()), None)
+    if existing:
+        folder_ids[f] = existing["id"]
+        print(f"📂 Dossier {f} déjà existant.")
+    else:
+        create_resp = requests.post(
+            "https://graph.microsoft.com/v1.0/me/mailFolders",
+            headers=headers,
+            json={"displayName": f}
+        )
+        if create_resp.status_code == 201:
+            folder_ids[f] = create_resp.json()["id"]
+            print(f"📂 Dossier {f} créé.")
+        else:
+            print(f"❌ Erreur création dossier {f}: {create_resp.text}")
+
+# -------------------------------
+# Récupération des emails
+# -------------------------------
+emails_url = "https://graph.microsoft.com/v1.0/me/mailfolders/Inbox/messages?$top=100&$orderby=receivedDateTime DESC"
+emails_resp = requests.get(emails_url, headers=headers)
+emails = emails_resp.json().get("value", [])
+
+print(f"📨 {len(emails)} emails récupérés.")
+
+# -------------------------------
+# Suppression des doublons avant déplacement
+# -------------------------------
+seen = set()
+cleaned_emails = []
+
+for mail in emails:
+    subject = mail.get("subject", "").lower().strip()
+    sender = mail.get("from", {}).get("emailAddress", {}).get("address", "").lower().strip()
+    mail_id = mail["id"]
+    key = (subject, sender)
+
+    if key in seen:
+        # C'est un doublon → suppression
+        delete_url = f"https://graph.microsoft.com/v1.0/me/messages/{mail_id}"
+        del_resp = requests.delete(delete_url, headers=headers)
+        if del_resp.status_code == 204:
+            print(f"🗑️ Doublon supprimé : '{subject}' de {sender}")
+        else:
+            print(f"⚠️ Erreur suppression doublon : {del_resp.text}")
+    else:
+        seen.add(key)
+        cleaned_emails.append(mail)
+
+# -------------------------------
+# Classement automatique uniquement pour emails P1‑P4
+# -------------------------------
+for mail in cleaned_emails:
+    subject = mail.get("subject", "").lower().strip()
+    mail_id = mail["id"]
+    target_folder = None
+
+    if "p1" in subject:
+        target_folder = "P1"
+    elif "p2" in subject or "certificate" in subject:
+        target_folder = "P2"
+    elif "p3" in subject:
+        target_folder = "P3"
+    elif "p4" in subject:
+        target_folder = "P4"
+
+    if target_folder:
+        move_url = f"https://graph.microsoft.com/v1.0/me/messages/{mail_id}/move"
+        move_resp = requests.post(move_url, headers=headers, json={"destinationId": folder_ids[target_folder]})
+        if move_resp.status_code == 201:
+            print(f"📌 Email '{mail.get('subject','Sans sujet')}' déplacé vers {target_folder}")
+        else:
+            print(f"⚠️ Erreur déplacement email '{mail.get('subject','Sans sujet')}': {move_resp.text}")
+    else:
+        # Sinon laisser dans la boîte de réception
+        print(f"✉️ Email '{mail.get('subject','Sans sujet')}' laissé dans la boîte de réception")
+
+print("✅ Classement et nettoyage terminé. Vérifie dans ton Outlook.")

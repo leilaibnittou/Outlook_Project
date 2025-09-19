@@ -1,0 +1,78 @@
+from msal import ConfidentialClientApplication, PublicClientApplication
+import requests
+import sys
+
+# ===============================
+# CONFIGURATION
+# ===============================
+MODE = "test"        # "test" (perso, delegated flow) ou "enterprise" (app-only)
+CLIENT_ID = "97e46eef-1704-4dce-83b0-dd4566b46a02"
+TENANT_ID = "50ee4a99-db9d-4ea8-98fe-c93def95fa13"
+CLIENT_SECRET = "9wj8Q~iSkwvHkrYXIboIpULAAoJLNAI271oQ-aoF"  # requis uniquement pour enterprise
+SCOPES = ["https://graph.microsoft.com/.default"] if MODE == "enterprise" else ["Mail.Read"]
+USER_EMAIL = "ton.email@domaine.com"  # utile pour enterprise
+
+# ===============================
+# OBTENTION DU TOKEN
+# ===============================
+token = None
+
+if MODE == "enterprise":
+    # App-only (Confidential Client)
+    app = ConfidentialClientApplication(
+        CLIENT_ID,
+        authority=f"https://login.microsoftonline.com/{TENANT_ID}",
+        client_credential=CLIENT_SECRET
+    )
+    result = app.acquire_token_for_client(scopes=SCOPES)
+
+elif MODE == "test":
+    # Delegated (login user)
+    app = PublicClientApplication(
+        CLIENT_ID,
+        authority=f"https://login.microsoftonline.com/{TENANT_ID}"
+    )
+    flow = app.initiate_device_flow(scopes=SCOPES)
+    if "user_code" not in flow:
+        print("Erreur lors de l'init du device flow :", flow)
+        sys.exit(1)
+
+    print("Veuillez vous connecter ici:", flow["verification_uri"])
+    print("Et entrez le code :", flow["user_code"])
+    result = app.acquire_token_by_device_flow(flow)
+
+# Vérification du résultat
+if "access_token" in result:
+    token = result["access_token"]
+    print("Connexion réussie ! Token obtenu.")
+else:
+    print("Échec de la connexion :", result.get("error_description"))
+    sys.exit(1)
+
+# ===============================
+# RECUPERATION DES EMAILS
+# ===============================
+headers = {
+    "Authorization": f"Bearer {token}",
+    "Accept": "application/json"
+}
+
+if MODE == "enterprise":
+    url = f"https://graph.microsoft.com/v1.0/users/{USER_EMAIL}/mailfolders/Inbox/messages?$top=10&$orderby=receivedDateTime DESC"
+else:
+    url = "https://graph.microsoft.com/v1.0/me/mailfolders/Inbox/messages?$top=10&$orderby=receivedDateTime DESC"
+
+response = requests.get(url, headers=headers)
+print("Status code:", response.status_code)
+
+if response.status_code == 200:
+    data = response.json()
+    if "value" in data:
+        for mail in data["value"]:
+            sender = mail.get('from', {}).get('emailAddress', {}).get('name', 'Inconnu')
+            subject = mail.get('subject', 'Sans objet')
+            print(f"De : {sender} | Objet : {subject}")
+    else:
+        print("Aucun mail trouvé :", data)
+else:
+    print("Erreur HTTP :", response.status_code, response.text)

@@ -1,0 +1,71 @@
+from msal import PublicClientApplication
+import requests
+
+# -------------------------------
+# Configuration Azure
+# -------------------------------
+CLIENT_ID = "0f9136a2-194d-458f-8044-55854a40f5f0"  # Remplacer par ton client ID Azure
+TENANT_ID = "common"          # "common" pour comptes personnels ou de test, ou ID du tenant pour entreprise
+REDIRECT_URI = "http://localhost"  # Même URL que dans l'enregistrement de l'app
+
+# Portée (permission déléguée)
+SCOPES = ["Mail.Read"]  # Ou Mail.ReadWrite si tu veux modifier les mails
+
+# -------------------------------
+# Initialisation de l'application publique
+# -------------------------------
+app = PublicClientApplication(
+    client_id=CLIENT_ID,
+    authority=f"https://login.microsoftonline.com/{TENANT_ID}"
+)
+
+# -------------------------------
+# Tentative de récupération du token
+# -------------------------------
+accounts = app.get_accounts()
+if accounts:
+    # Essaye de récupérer le token en cache
+    result = app.acquire_token_silent(SCOPES, account=accounts[0])
+else:
+    result = None
+
+# Si pas de token, déclenche le flow interactif
+# Si pas de token, déclenche le flow interactif
+if not result:
+    print("Connexion nécessaire, ouverture du navigateur...")
+    result = app.acquire_token_interactive(scopes=SCOPES)
+
+
+# -------------------------------
+# Vérification du token
+# -------------------------------
+if "access_token" in result:
+    token = result["access_token"]
+    print("Connexion réussie ! Token obtenu.")
+
+    # -------------------------------
+    # Récupération des 10 derniers mails
+    # -------------------------------
+    url = "https://graph.microsoft.com/v1.0/me/mailfolders/Inbox/messages?$top=10&$orderby=receivedDateTime DESC"
+
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/json"
+    }
+
+    response = requests.get(url, headers=headers)
+
+    print("Status code:", response.status_code)
+    if response.status_code == 200:
+        data = response.json()
+        if "value" in data:
+            for mail in data["value"]:
+                sender = mail.get('from', {}).get('emailAddress', {}).get('name', 'Inconnu')
+                subject = mail.get('subject', 'Sans objet')
+                print(f"De : {sender} | Objet : {subject}")
+        else:
+            print("Aucun email récupéré ou clé 'value' absente :", data)
+    else:
+        print("Erreur HTTP :", response.status_code, response.text)
+else:
+    print("Échec de la connexion :", result.get("error_description"))
