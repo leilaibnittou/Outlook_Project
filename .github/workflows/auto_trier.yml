@@ -36,7 +36,7 @@ jobs:
           APP_ENV: TEST
           OUTLOOK_USER_ID: ${{ secrets.OUTLOOK_USER_ID }}
           TEST_CLIENT_ID: ${{ secrets.TEST_CLIENT_ID }}
-          TEST_CLIENT_SECRET: ${{ secrets.TEST_CLIENT_SECRET }}
+          TEST_SECRET: ${{ secrets.TEST_CLIENT_SECRET }}
           TEST_TENANT_ID: ${{ secrets.TEST_TENANT_ID }}
 
       - name: ▶️ Lancer le script de tri
