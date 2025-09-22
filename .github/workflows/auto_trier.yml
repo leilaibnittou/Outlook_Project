@@ -1,0 +1,27 @@
+name: Auto tri des emails
+ 
+on:
+  schedule:
+    - cron: "*/1 * * * *"  # toutes les 5 minutes
+  workflow_dispatch:       # permet un déclenchement manuel
+ 
+jobs:
+  run-script:
+    runs-on: ubuntu-latest   # ou windows-latest si tu préfères
+ 
+    steps:
+      - uses: actions/checkout@v3
+ 
+      - uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+ 
+      - run: pip install -r requirements.txt
+ 
+      - name: Run tri des emails
+        env:
+          APP_ENV: TEST
+          TEST_CLIENT_ID: ${{ secrets.TEST_CLIENT_ID }}
+          TEST_CLIENT_SECRET: ${{ secrets.TEST_CLIENT_SECRET }}
+          TEST_TENANT_ID: ${{ secrets.TEST_TENANT_ID }}
+        run: python main.py
