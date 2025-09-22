@@ -5,9 +5,9 @@ import re
 import sys
 
 # -------------------------------
-# ENVIRONNEMENT (TEST ou PROD)
+# ENVIRONNEMENT : TEST ou PROD
 # -------------------------------
-ENV = os.environ.get("APP_ENV", "TEST")  # par défaut TEST
+ENV = os.environ.get("APP_ENV", "TEST")
 
 if ENV == "PROD":
     CLIENT_ID = os.environ.get("PROD_CLIENT_ID")
@@ -20,7 +20,9 @@ else:
 
 SCOPES = ["https://graph.microsoft.com/.default"]
 
+# -------------------------------
 # Vérification des variables
+# -------------------------------
 if not CLIENT_ID or not CLIENT_SECRET or not TENANT_ID:
     print("❌ Erreur : variables d'environnement manquantes")
     sys.exit(1)
@@ -46,10 +48,10 @@ headers = {
     "Content-Type": "application/json"
 }
 
-print(f"✅ Connexion réussie ({ENV}) !")
+print(f"✅ Connexion réussie ({ENV})")
 
 # -------------------------------
-# DOSSIERS ET MOTS-CLÉS (regex exacts)
+# MOTS-CLÉS et dossiers cibles
 # -------------------------------
 keywords = {
     "P1": [r"\bp1\b"],
@@ -64,7 +66,7 @@ compiled_keywords = {
 }
 
 # -------------------------------
-# FONCTIONS UTILES
+# FONCTIONS UTILITAIRES
 # -------------------------------
 def get_folders():
     url = "https://graph.microsoft.com/v1.0/me/mailFolders?$top=100"
@@ -88,11 +90,11 @@ def get_folder_ids(targets):
                 headers=headers,
                 json={"displayName": f}
             )
-            data = resp.json()
-            if resp.status_code in (200, 201) and "id" in data:
-                folder_ids[f] = data["id"]
+            if "id" in resp.json():
+                folder_ids[f] = resp.json()["id"]
+                print(f"📁 Dossier créé : {f}")
             else:
-                print(f"❌ Erreur lors de la création du dossier '{f}': {data}")
+                print(f"❌ Erreur lors de la création du dossier {f} : {resp.text}")
     return folder_ids
 
 def get_emails():
@@ -111,14 +113,13 @@ def move_email(mail_id, folder_id):
     return resp.status_code in (200, 201)
 
 # -------------------------------
-# TRI DES EMAILS
+# FONCTION PRINCIPALE
 # -------------------------------
 def trier_emails():
     folder_ids = get_folder_ids(keywords.keys())
     emails = get_emails()
     print(f"📨 {len(emails)} emails récupérés")
 
-    # Supprimer doublons
     seen_subjects = set()
     emails_unique = []
 
@@ -135,7 +136,6 @@ def trier_emails():
             seen_subjects.add(subject)
             emails_unique.append(mail)
 
-    # Déplacer emails
     for mail in emails_unique:
         subject = (mail.get("subject") or "")
         mail_id = mail["id"]
@@ -147,14 +147,14 @@ def trier_emails():
                 break
 
         if target_folder:
-            if move_email(mail_id, folder_ids.get(target_folder)):
+            if move_email(mail_id, folder_ids[target_folder]):
                 print(f"📌 '{subject}' déplacé vers {target_folder}")
             else:
                 print(f"⚠️ Erreur déplacement '{subject}'")
         else:
             print(f"✉️ '{subject}' laissé dans Inbox")
 
-    print("✅ Tri et suppression des doublons terminé.")
+    print("✅ Tri terminé")
 
 # -------------------------------
 # EXECUTION
