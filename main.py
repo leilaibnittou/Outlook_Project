@@ -79,16 +79,20 @@ def get_folders():
 
     while url:
         resp = requests.get(url, headers=headers)
-        
+
+        # 👉 Impression du code retour pour debug
+        print(f"🔍 Requête vers {url} - Code HTTP: {resp.status_code}")
+
+        # 👉 Si erreur HTTP, on affiche le texte brut et on quitte
         if resp.status_code != 200:
-            print(f"❌ Erreur lors de la récupération des dossiers (code {resp.status_code})")
-            print(resp.text)  # utile pour voir l'erreur exacte de l'API
+            print("❌ Erreur HTTP lors de la récupération des dossiers :")
+            print(resp.text)
             sys.exit(1)
 
         try:
             data = resp.json()
         except ValueError:
-            print("❌ La réponse n'est pas au format JSON.")
+            print("❌ La réponse n'est pas un JSON valide :")
             print(resp.text)
             sys.exit(1)
 
@@ -96,6 +100,7 @@ def get_folders():
         url = data.get("@odata.nextLink")
 
     return folders
+
 
 
 def get_folder_ids(targets):
