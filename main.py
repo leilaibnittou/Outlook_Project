@@ -76,11 +76,27 @@ compiled_keywords = {
 def get_folders():
     url = f"https://graph.microsoft.com/v1.0/users/{USER_ID}/mailFolders?$top=100"
     folders = []
+
     while url:
-        resp = requests.get(url, headers=headers).json()
-        folders.extend(resp.get("value", []))
-        url = resp.get("@odata.nextLink")
+        resp = requests.get(url, headers=headers)
+        
+        if resp.status_code != 200:
+            print(f"❌ Erreur lors de la récupération des dossiers (code {resp.status_code})")
+            print(resp.text)  # utile pour voir l'erreur exacte de l'API
+            sys.exit(1)
+
+        try:
+            data = resp.json()
+        except ValueError:
+            print("❌ La réponse n'est pas au format JSON.")
+            print(resp.text)
+            sys.exit(1)
+
+        folders.extend(data.get("value", []))
+        url = data.get("@odata.nextLink")
+
     return folders
+
 
 def get_folder_ids(targets):
     folder_ids = {}
