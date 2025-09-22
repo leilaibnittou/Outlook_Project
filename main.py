@@ -4,6 +4,11 @@ import requests
 import re
 import sys
 
+USER_ID = os.environ.get("OUTLOOK_USER_ID")
+if not USER_ID:
+    print("❌ Erreur : variable d'environnement OUTLOOK_USER_ID manquante")
+    exit(1)
+
 # -------------------------------
 # ENVIRONNEMENT : TEST ou PROD
 # -------------------------------
@@ -69,7 +74,7 @@ compiled_keywords = {
 # FONCTIONS UTILITAIRES
 # -------------------------------
 def get_folders():
-    url = "https://graph.microsoft.com/v1.0/me/mailFolders?$top=100"
+    url = f"https://graph.microsoft.com/v1.0/users/{USER_ID}/mailFolders?$top=100"
     folders = []
     while url:
         resp = requests.get(url, headers=headers).json()
@@ -86,7 +91,7 @@ def get_folder_ids(targets):
             folder_ids[f] = folder["id"]
         else:
             resp = requests.post(
-                "https://graph.microsoft.com/v1.0/me/mailFolders",
+                f"https://graph.microsoft.com/v1.0/users/{USER_ID}/mailFolders",
                 headers=headers,
                 json={"displayName": f}
             )
@@ -98,17 +103,17 @@ def get_folder_ids(targets):
     return folder_ids
 
 def get_emails():
-    url = "https://graph.microsoft.com/v1.0/me/mailfolders/Inbox/messages?$top=200&$orderby=receivedDateTime DESC"
+    url = f"https://graph.microsoft.com/v1.0/users/{USER_ID}/mailfolders/Inbox/messages?$top=200&$orderby=receivedDateTime DESC"
     resp = requests.get(url, headers=headers)
     return resp.json().get("value", [])
 
 def delete_email(mail_id):
-    url = f"https://graph.microsoft.com/v1.0/me/messages/{mail_id}"
+    url = f"https://graph.microsoft.com/v1.0/users/{USER_ID}/messages/{mail_id}"
     resp = requests.delete(url, headers=headers)
     return resp.status_code == 204
 
 def move_email(mail_id, folder_id):
-    url = f"https://graph.microsoft.com/v1.0/me/messages/{mail_id}/move"
+    url = f"https://graph.microsoft.com/v1.0/users/{USER_ID}/messages/{mail_id}/move"
     resp = requests.post(url, headers=headers, json={"destinationId": folder_id})
     return resp.status_code in (200, 201)
 
