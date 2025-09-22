@@ -2,7 +2,7 @@ name: Auto tri des emails
 
 on:
   schedule:
-    - cron: "*/1 * * * *"
+    - cron: "*/1 * * * *"  # Exécution toutes les 5 minutes
   workflow_dispatch:
 
 jobs:
@@ -10,25 +10,23 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repo
+      - name: Checkout du code
         uses: actions/checkout@v3
 
-      - name: Set up Python
+      - name: Setup Python
         uses: actions/setup-python@v4
         with:
           python-version: "3.11"
 
-      - name: Upgrade pip and install dependencies
+      - name: Installer les dépendances
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install msal requests
 
-      - name: Vérifier les paquets installés
-        run: pip list
-
-      - name: Run tri des emails
+      - name: Exécuter le script de tri
         env:
           APP_ENV: TEST
+          OUTLOOK_USER_ID: ${{ secrets.OUTLOOK_USER_ID }}
           TEST_CLIENT_ID: ${{ secrets.TEST_CLIENT_ID }}
           TEST_CLIENT_SECRET: ${{ secrets.TEST_CLIENT_SECRET }}
           TEST_TENANT_ID: ${{ secrets.TEST_TENANT_ID }}
