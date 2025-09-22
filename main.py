@@ -4,9 +4,6 @@ import requests
 import re
 import sys
 
-# -------------------------------
-# VARIABLE UTILISATEUR / SERVICE
-# -------------------------------
 USER_ID = os.environ.get("OUTLOOK_USER_ID")
 if not USER_ID:
     print("❌ Erreur : variable d'environnement OUTLOOK_USER_ID manquante")
@@ -29,10 +26,10 @@ else:
 SCOPES = ["https://graph.microsoft.com/.default"]
 
 # -------------------------------
-# Vérification des variables essentielles
+# Vérification des variables
 # -------------------------------
 if not CLIENT_ID or not CLIENT_SECRET or not TENANT_ID:
-    print("❌ Erreur : variables d'environnement manquantes (CLIENT_ID / SECRET / TENANT_ID)")
+    print("❌ Erreur : variables d'environnement manquantes")
     sys.exit(1)
 
 # -------------------------------
@@ -59,7 +56,7 @@ headers = {
 print(f"✅ Connexion réussie ({ENV})")
 
 # -------------------------------
-# Mots‑clés et dossiers cibles
+# MOTS-CLÉS et dossiers cibles
 # -------------------------------
 keywords = {
     "P1": [r"\bp1\b"],
@@ -67,38 +64,27 @@ keywords = {
     "P3": [r"\bp3\b"],
     "P4": [r"\bp4\b"]
 }
-compiled_keywords = {folder: [re.compile(pat, re.IGNORECASE) for pat in pats] 
-                     for folder, pats in keywords.items()}
+
+compiled_keywords = {
+    folder: [re.compile(pat, re.IGNORECASE) for pat in pats]
+    for folder, pats in keywords.items()
+}
 
 # -------------------------------
-# FONCTIONS UTILITAIRES (avec debug)
+# FONCTIONS UTILITAIRES
 # -------------------------------
 def get_folders():
     url = f"https://graph.microsoft.com/v1.0/users/{USER_ID}/mailFolders?$top=100"
     folders = []
     while url:
-        try:
-            resp = requests.get(url, headers=headers)
-        except Exception as e:
-            print("❌ Erreur lors de la requête HTTP:", e)
+        response = requests.get(url, headers=headers)
+
+        if response.status_code != 200:
+            print(f"❌ Erreur API get_folders: {response.status_code}")
+            print(f"Réponse brute: {response.text}")
             sys.exit(1)
 
-        # Debug : status code et corps
-        print(f"🔍 Requête vers: {url}")
-        print(f"🔍 Status Code: {resp.status_code}")
-        print(f"🔍 Corps de la réponse: {resp.text[:500]}")  # Limite pour ne pas flooder trop
-
-        if resp.status_code != 200:
-            print("❌ Erreur HTTP : impossible d'obtenir la liste des dossiers.")
-            sys.exit(1)
-
-        try:
-            data = resp.json()
-        except ValueError:
-            print("❌ Réponse non‑valide JSON.")
-            print(resp.text)
-            sys.exit(1)
-
+        data = response.json()
         folders.extend(data.get("value", []))
         url = data.get("@odata.nextLink")
     return folders
@@ -111,46 +97,50 @@ def get_folder_ids(targets):
         if folder:
             folder_ids[f] = folder["id"]
         else:
-            # Création du dossier si non existant
             resp = requests.post(
                 f"https://graph.microsoft.com/v1.0/users/{USER_ID}/mailFolders",
                 headers=headers,
                 json={"displayName": f}
             )
-            print(f"🔍 Création dossier {f}, status {resp.status_code}")
-            print(f"🔍 Corps réponse création dossier: {resp.text}")
-            if resp.status_code in (200, 201) and "id" in resp.json():
-                folder_ids[f] = resp.json()["id"]
+            if resp.status_code != 201 and resp.status_code != 200:
+                print(f"❌ Erreur création dossier {f}: {resp.status_code}")
+                print(f"Réponse brute: {resp.text}")
+                sys.exit(1)
+
+            try:
+                resp_json = resp.json()
+            except Exception as e:
+                print(f"❌ Erreur JSON création dossier {f}: {e}")
+                print(f"Réponse brute: {resp.text}")
+                sys.exit(1)
+
+            if "id" in resp_json:
+                folder_ids[f] = resp_json["id"]
                 print(f"📁 Dossier créé : {f}")
             else:
-                print(f"❌ Erreur lors de la création du dossier {f}")
+                print(f"❌ Erreur lors de la création du dossier {f} : {resp.text}")
+                sys.exit(1)
     return folder_ids
 
 def get_emails():
-    url = f"https://graph.microsoft.com/v1.0/users/{USER_ID}/mailFolders/Inbox/messages?$top=200&$orderby=receivedDateTime DESC"
+    url = f"https://graph.microsoft.com/v1.0/users/{USER_ID}/mailfolders/Inbox/messages?$top=200&$orderby=receivedDateTime DESC"
     resp = requests.get(url, headers=headers)
+
     if resp.status_code != 200:
-        print(f"❌ Erreur récupération emails, code: {resp.status_code}")
-        print(resp.text)
+        print(f"❌ Erreur API get_emails: {resp.status_code}")
+        print(f"Réponse brute: {resp.text}")
         sys.exit(1)
-    try:
-        data = resp.json()
-    except ValueError:
-        print("❌ Réponse non‑valide JSON pour emails")
-        print(resp.text)
-        sys.exit(1)
-    return data.get("value", [])
+
+    return resp.json().get("value", [])
 
 def delete_email(mail_id):
     url = f"https://graph.microsoft.com/v1.0/users/{USER_ID}/messages/{mail_id}"
     resp = requests.delete(url, headers=headers)
-    print(f"🔍 Suppression email {mail_id}, status {resp.status_code}")
     return resp.status_code == 204
 
 def move_email(mail_id, folder_id):
     url = f"https://graph.microsoft.com/v1.0/users/{USER_ID}/messages/{mail_id}/move"
     resp = requests.post(url, headers=headers, json={"destinationId": folder_id})
-    print(f"🔍 Déplacement email {mail_id} → dossier {folder_id}, status {resp.status_code}")
     return resp.status_code in (200, 201)
 
 # -------------------------------
@@ -163,9 +153,11 @@ def trier_emails():
 
     seen_subjects = set()
     emails_unique = []
+
     for mail in emails:
         subject = (mail.get("subject") or "").strip().lower()
         mail_id = mail["id"]
+
         if subject in seen_subjects:
             if delete_email(mail_id):
                 print(f"🗑️ Doublon supprimé : '{subject}'")
@@ -179,12 +171,14 @@ def trier_emails():
         subject = (mail.get("subject") or "")
         mail_id = mail["id"]
         target_folder = None
+
         for folder, regex_list in compiled_keywords.items():
             if any(regex.search(subject) for regex in regex_list):
                 target_folder = folder
                 break
+
         if target_folder:
-            if move_email(mail_id, folder_ids.get(target_folder, "")):
+            if move_email(mail_id, folder_ids[target_folder]):
                 print(f"📌 '{subject}' déplacé vers {target_folder}")
             else:
                 print(f"⚠️ Erreur déplacement '{subject}'")
