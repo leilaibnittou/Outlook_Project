@@ -6,9 +6,19 @@ import os
 # -------------------------------
 # CONFIGURATION (via secrets GitHub)
 # -------------------------------
-CLIENT_ID = os.getenv("APP_CLIENT_ID")
-CLIENT_SECRET = os.getenv("APP_CLIENT_SECRET")
-TENANT_ID = os.getenv("APP_TENANT_ID")
+APP_ENV = os.getenv("APP_ENV", "TEST")
+
+if APP_ENV == "TEST":
+    CLIENT_ID = os.getenv("APP_CLIENT_ID")
+    CLIENT_SECRET = os.getenv("APP_CLIENT_SECRET")
+    TENANT_ID = os.getenv("APP_TENANT_ID")
+    USER_EMAIL = os.getenv("USER_EMAIL")
+else:
+    CLIENT_ID = os.getenv("PROD_CLIENT_ID")
+    CLIENT_SECRET = os.getenv("PROD_CLIENT_SECRET")
+    TENANT_ID = os.getenv("PROD_TENANT_ID")
+    USER_EMAIL = os.getenv("PROD_USER_EMAIL")
+
 SCOPES = ["https://graph.microsoft.com/.default"]
 
 # -------------------------------
@@ -21,6 +31,7 @@ app = ConfidentialClientApplication(
 )
 
 result = app.acquire_token_silent(SCOPES, account=None)
+
 if not result:
     result = app.acquire_token_for_client(scopes=SCOPES)
 
@@ -52,10 +63,12 @@ compiled_keywords = {
 }
 
 # -------------------------------
-# FONCTIONS API OUTLOOK
+# FONCTIONS API OUTLOOK (utilise /users/{email})
 # -------------------------------
+BASE_URL = f"https://graph.microsoft.com/v1.0/users/{USER_EMAIL}"
+
 def get_folders():
-    url = "https://graph.microsoft.com/v1.0/me/mailFolders?$top=100"
+    url = f"{BASE_URL}/mailFolders?$top=100"
     folders = []
     while url:
         resp = requests.get(url, headers=headers).json()
@@ -71,38 +84,42 @@ def get_folder_ids(targets):
         if match:
             folder_ids[name] = match["id"]
         else:
+            # Créer le dossier
             resp = requests.post(
-                "https://graph.microsoft.com/v1.0/me/mailFolders",
+                f"{BASE_URL}/mailFolders",
                 headers=headers,
                 json={"displayName": name}
             )
             resp_json = resp.json()
+
             if resp.status_code >= 400:
                 print(f"❌ Erreur création dossier '{name}': {resp.status_code}")
                 print(f"🔎 Réponse : {resp_json}")
                 continue
+
             folder_ids[name] = resp_json.get("id")
     return folder_ids
 
 def get_emails():
-    url = "https://graph.microsoft.com/v1.0/me/mailFolders/Inbox/messages?$top=100&$orderby=receivedDateTime DESC"
+    url = f"{BASE_URL}/mailFolders/Inbox/messages?$top=100&$orderby=receivedDateTime DESC"
     resp = requests.get(url, headers=headers)
     return resp.json().get("value", [])
 
 def delete_email(mail_id):
-    url = f"https://graph.microsoft.com/v1.0/me/messages/{mail_id}"
+    url = f"{BASE_URL}/messages/{mail_id}"
     resp = requests.delete(url, headers=headers)
     return resp.status_code == 204
 
 def move_email(mail_id, folder_id):
-    url = f"https://graph.microsoft.com/v1.0/me/messages/{mail_id}/move"
+    url = f"{BASE_URL}/messages/{mail_id}/move"
     resp = requests.post(url, headers=headers, json={"destinationId": folder_id})
     return resp.status_code in (200, 201)
 
 # -------------------------------
-# TRI DES EMAILS
+# EXÉCUTION DU TRI
 # -------------------------------
 folder_ids = get_folder_ids(keywords.keys())
+
 emails = get_emails()
 print(f"📨 {len(emails)} emails récupérés")
 
