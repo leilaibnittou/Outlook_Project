@@ -6,17 +6,9 @@ import os
 # -------------------------------
 # CONFIGURATION (via secrets GitHub)
 # -------------------------------
-APP_ENV = os.getenv("APP_ENV", "TEST")
-
-if APP_ENV == "TEST":
-    CLIENT_ID = os.getenv("TEST_CLIENT_ID")
-    CLIENT_SECRET = os.getenv("TEST_CLIENT_SECRET")
-    TENANT_ID = os.getenv("TEST_TENANT_ID")
-else:
-    CLIENT_ID = os.getenv("PROD_CLIENT_ID")
-    CLIENT_SECRET = os.getenv("PROD_CLIENT_SECRET")
-    TENANT_ID = os.getenv("PROD_TENANT_ID")
-
+CLIENT_ID = os.getenv("APP_CLIENT_ID")
+CLIENT_SECRET = os.getenv("APP_CLIENT_SECRET")
+TENANT_ID = os.getenv("APP_TENANT_ID")
 SCOPES = ["https://graph.microsoft.com/.default"]
 
 # -------------------------------
@@ -29,7 +21,6 @@ app = ConfidentialClientApplication(
 )
 
 result = app.acquire_token_silent(SCOPES, account=None)
-
 if not result:
     result = app.acquire_token_for_client(scopes=SCOPES)
 
@@ -80,19 +71,16 @@ def get_folder_ids(targets):
         if match:
             folder_ids[name] = match["id"]
         else:
-            # Créer le dossier
             resp = requests.post(
                 "https://graph.microsoft.com/v1.0/me/mailFolders",
                 headers=headers,
                 json={"displayName": name}
             )
             resp_json = resp.json()
-
             if resp.status_code >= 400:
-                print(f"❌ Erreur lors de la création du dossier '{name}': {resp.status_code}")
+                print(f"❌ Erreur création dossier '{name}': {resp.status_code}")
                 print(f"🔎 Réponse : {resp_json}")
                 continue
-
             folder_ids[name] = resp_json.get("id")
     return folder_ids
 
@@ -112,10 +100,9 @@ def move_email(mail_id, folder_id):
     return resp.status_code in (200, 201)
 
 # -------------------------------
-# EXÉCUTION DU TRI
+# TRI DES EMAILS
 # -------------------------------
 folder_ids = get_folder_ids(keywords.keys())
-
 emails = get_emails()
 print(f"📨 {len(emails)} emails récupérés")
 
