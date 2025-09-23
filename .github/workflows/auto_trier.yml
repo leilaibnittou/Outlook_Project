@@ -1,49 +1,31 @@
-name: Auto tri des emails
+name: Tri automatique des emails
 
 on:
   schedule:
-    - cron: "*/1 * * * *"  # Toutes les 5 minutes (GitHub n'autorise pas moins)
-  workflow_dispatch:       # Lancement manuel possible
+    - cron: "*/1 * * * *" # Toutes les 5 minutes
+  workflow_dispatch:
 
 jobs:
-  run-script:
+  run-tri:
     runs-on: ubuntu-latest
 
     steps:
-      - name: 📥 Checkout du code
+      - name: Checkout du code
         uses: actions/checkout@v3
 
-      - name: 🐍 Installer Python
+      - name: Configurer Python
         uses: actions/setup-python@v4
         with:
           python-version: "3.11"
 
-      - name: 📦 Installer les dépendances
+      - name: Installer les dépendances
         run: |
-          python -m pip install --upgrade pip
+          pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: 🛠️ Vérification des secrets
-        run: |
-          echo "APP_ENV=$APP_ENV"
-          if [ -z "$OUTLOOK_USER_ID" ]; then echo '❌ OUTLOOK_USER_ID manquant'; exit 1; fi
-          if [ -z "$TEST_CLIENT_ID" ]; then echo '❌ TEST_CLIENT_ID manquant'; exit 1; fi
-          if [ -z "$TEST_CLIENT_SECRET" ]; then echo '❌ TEST_CLIENT_SECRET manquant'; exit 1; fi
-          if [ -z "$TEST_TENANT_ID" ]; then echo '❌ TEST_TENANT_ID manquant'; exit 1; fi
-          echo "✅ Tous les secrets sont bien définis"
-
+      - name: Lancer le tri automatique
         env:
-          APP_ENV: TEST
-          OUTLOOK_USER_ID: ${{ secrets.OUTLOOK_USER_ID }}
-          TEST_CLIENT_ID: ${{ secrets.TEST_CLIENT_ID }}
-          TEST_SECRET: ${{ secrets.TEST_CLIENT_SECRET }}
-          TEST_TENANT_ID: ${{ secrets.TEST_TENANT_ID }}
-
-      - name: ▶️ Lancer le script de tri
-        env:
-          APP_ENV: TEST
-          OUTLOOK_USER_ID: ${{ secrets.OUTLOOK_USER_ID }}
-          TEST_CLIENT_ID: ${{ secrets.TEST_CLIENT_ID }}
-          TEST_CLIENT_SECRET: ${{ secrets.TEST_CLIENT_SECRET }}
-          TEST_TENANT_ID: ${{ secrets.TEST_TENANT_ID }}
+          APP_CLIENT_ID: ${{ secrets.APP_CLIENT_ID }}
+          APP_CLIENT_SECRET: ${{ secrets.APP_CLIENT_SECRET }}
+          APP_TENANT_ID: ${{ secrets.APP_TENANT_ID }}
         run: python main.py
