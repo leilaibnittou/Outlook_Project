@@ -1,29 +1,40 @@
-import os
-import requests
 from msal import ConfidentialClientApplication
+import requests
 import re
+import os
 
-# ----------------------------
-# Configuration via GitHub Secrets
-# ----------------------------
-CLIENT_ID = os.environ.get("APP_CLIENT_ID")
-CLIENT_SECRET = os.environ.get("APP_CLIENT_SECRET")
-TENANT_ID = os.environ.get("APP_TENANT_ID")
+# -------------------------------
+# CONFIGURATION (via secrets GitHub)
+# -------------------------------
+APP_ENV = os.getenv("APP_ENV", "TEST")
+
+if APP_ENV == "TEST":
+    CLIENT_ID = os.getenv("TEST_CLIENT_ID")
+    CLIENT_SECRET = os.getenv("TEST_CLIENT_SECRET")
+    TENANT_ID = os.getenv("TEST_TENANT_ID")
+else:
+    CLIENT_ID = os.getenv("PROD_CLIENT_ID")
+    CLIENT_SECRET = os.getenv("PROD_CLIENT_SECRET")
+    TENANT_ID = os.getenv("PROD_TENANT_ID")
+
 SCOPES = ["https://graph.microsoft.com/.default"]
 
-# ----------------------------
-# Authentification
-# ----------------------------
+# -------------------------------
+# AUTHENTIFICATION
+# -------------------------------
 app = ConfidentialClientApplication(
     client_id=CLIENT_ID,
     client_credential=CLIENT_SECRET,
     authority=f"https://login.microsoftonline.com/{TENANT_ID}"
 )
 
-result = app.acquire_token_for_client(scopes=SCOPES)
+result = app.acquire_token_silent(SCOPES, account=None)
+
+if not result:
+    result = app.acquire_token_for_client(scopes=SCOPES)
 
 if "access_token" not in result:
-    print("❌ Échec de la connexion :", result.get("error_description"))
+    print("❌ Authentification échouée :", result.get("error_description"))
     exit()
 
 token = result["access_token"]
@@ -34,27 +45,32 @@ headers = {
 }
 print("✅ Authentification réussie")
 
-# ----------------------------
-# Regex des priorités
-# ----------------------------
+# -------------------------------
+# MOTS-CLÉS ET DOSSIERS
+# -------------------------------
 keywords = {
     "P1": [r"\bp1\b"],
     "P2": [r"\bp2\b", r"\bcertificate\b"],
     "P3": [r"\bp3\b"],
     "P4": [r"\bp4\b"]
 }
+
 compiled_keywords = {
-    folder: [re.compile(pat, re.IGNORECASE) for pat in pats]
-    for folder, pats in keywords.items()
+    folder: [re.compile(pattern, re.IGNORECASE) for pattern in patterns]
+    for folder, patterns in keywords.items()
 }
 
-# ----------------------------
-# Fonctions principales
-# ----------------------------
+# -------------------------------
+# FONCTIONS API OUTLOOK
+# -------------------------------
 def get_folders():
     url = "https://graph.microsoft.com/v1.0/me/mailFolders?$top=100"
-    resp = requests.get(url, headers=headers)
-    return resp.json().get("value", [])
+    folders = []
+    while url:
+        resp = requests.get(url, headers=headers).json()
+        folders.extend(resp.get("value", []))
+        url = resp.get("@odata.nextLink")
+    return folders
 
 def get_folder_ids(targets):
     folder_ids = {}
@@ -64,34 +80,44 @@ def get_folder_ids(targets):
         if match:
             folder_ids[name] = match["id"]
         else:
+            # Créer le dossier
             resp = requests.post(
                 "https://graph.microsoft.com/v1.0/me/mailFolders",
                 headers=headers,
                 json={"displayName": name}
             )
-            folder_ids[name] = resp.json()["id"]
+            resp_json = resp.json()
+
+            if resp.status_code >= 400:
+                print(f"❌ Erreur lors de la création du dossier '{name}': {resp.status_code}")
+                print(f"🔎 Réponse : {resp_json}")
+                continue
+
+            folder_ids[name] = resp_json.get("id")
     return folder_ids
 
 def get_emails():
-    url = "https://graph.microsoft.com/v1.0/me/mailFolders/Inbox/messages?$top=50"
+    url = "https://graph.microsoft.com/v1.0/me/mailFolders/Inbox/messages?$top=100&$orderby=receivedDateTime DESC"
     resp = requests.get(url, headers=headers)
     return resp.json().get("value", [])
 
 def delete_email(mail_id):
     url = f"https://graph.microsoft.com/v1.0/me/messages/{mail_id}"
-    return requests.delete(url, headers=headers).status_code == 204
+    resp = requests.delete(url, headers=headers)
+    return resp.status_code == 204
 
 def move_email(mail_id, folder_id):
     url = f"https://graph.microsoft.com/v1.0/me/messages/{mail_id}/move"
-    data = {"destinationId": folder_id}
-    return requests.post(url, headers=headers, json=data).status_code in (200, 201)
+    resp = requests.post(url, headers=headers, json={"destinationId": folder_id})
+    return resp.status_code in (200, 201)
 
-# ----------------------------
-# Exécution principale
-# ----------------------------
+# -------------------------------
+# EXÉCUTION DU TRI
+# -------------------------------
 folder_ids = get_folder_ids(keywords.keys())
+
 emails = get_emails()
-print(f"📨 {len(emails)} email(s) récupérés")
+print(f"📨 {len(emails)} emails récupérés")
 
 seen_subjects = set()
 emails_unique = []
@@ -99,9 +125,12 @@ emails_unique = []
 for mail in emails:
     subject = (mail.get("subject") or "").strip().lower()
     mail_id = mail["id"]
+
     if subject in seen_subjects:
         if delete_email(mail_id):
             print(f"🗑️ Doublon supprimé : '{subject}'")
+        else:
+            print(f"⚠️ Erreur suppression doublon : '{subject}'")
     else:
         seen_subjects.add(subject)
         emails_unique.append(mail)
@@ -109,15 +138,19 @@ for mail in emails:
 for mail in emails_unique:
     subject = (mail.get("subject") or "")
     mail_id = mail["id"]
-    destination = None
-    for folder, patterns in compiled_keywords.items():
-        if any(pat.search(subject) for pat in patterns):
-            destination = folder
+    target_folder = None
+
+    for folder, regexes in compiled_keywords.items():
+        if any(regex.search(subject) for regex in regexes):
+            target_folder = folder
             break
-    if destination:
-        if move_email(mail_id, folder_ids[destination]):
-            print(f"📌 '{subject}' déplacé vers {destination}")
+
+    if target_folder:
+        if move_email(mail_id, folder_ids.get(target_folder)):
+            print(f"📌 '{subject}' déplacé vers {target_folder}")
         else:
-            print(f"⚠️ Échec déplacement : {subject}")
+            print(f"⚠️ Erreur déplacement : '{subject}'")
     else:
-        print(f"✉️ Aucun mot-clé trouvé : {subject}")
+        print(f"✉️ '{subject}' laissé dans Inbox")
+
+print("✅ Traitement terminé.")
