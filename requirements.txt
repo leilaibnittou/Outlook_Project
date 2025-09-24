@@ -3,6 +3,6 @@
 # azure-monitor-opentelemetry
 
 azure-functions
-msal==1.25.0
+msal
 requests
 
