@@ -1,160 +1,152 @@
-from msal import ConfidentialClientApplication
+import logging
 import requests
 import re
+from msal import ConfidentialClientApplication
+
+# -------------------------------
+# CONFIGURATION
+# -------------------------------
 import os
 
-# -------------------------------
-# CONFIGURATION (via secrets GitHub)
-# -------------------------------
-APP_ENV = os.getenv("APP_ENV", "TEST")
-
-if APP_ENV == "TEST":
-    CLIENT_ID = os.getenv("APP_CLIENT_ID")
-    CLIENT_SECRET = os.getenv("APP_CLIENT_SECRET")
-    TENANT_ID = os.getenv("APP_TENANT_ID")
-    USER_EMAIL = os.getenv("USER_EMAIL")
-else:
-    CLIENT_ID = os.getenv("PROD_CLIENT_ID")
-    CLIENT_SECRET = os.getenv("PROD_CLIENT_SECRET")
-    TENANT_ID = os.getenv("PROD_TENANT_ID")
-    USER_EMAIL = os.getenv("PROD_USER_EMAIL")
-
+CLIENT_ID = os.environ["CLIENT_ID"]
+CLIENT_SECRET = os.environ["CLIENT_SECRET"]
+TENANT_ID = os.environ["TENANT_ID"]
 SCOPES = ["https://graph.microsoft.com/.default"]
+USER_ID = "compte_test_projet@outlook.com"  # 👉 À modifier selon le compte cible
 
 # -------------------------------
 # AUTHENTIFICATION
 # -------------------------------
-app = ConfidentialClientApplication(
-    client_id=CLIENT_ID,
-    client_credential=CLIENT_SECRET,
-    authority=f"https://login.microsoftonline.com/{TENANT_ID}"
-)
+def get_access_token():
+    app = ConfidentialClientApplication(
+        client_id=CLIENT_ID,
+        client_credential=CLIENT_SECRET,
+        authority=f"https://login.microsoftonline.com/{TENANT_ID}"
+    )
 
-result = app.acquire_token_silent(SCOPES, account=None)
+    result = app.acquire_token_silent(SCOPES, account=None)
+    if not result:
+        logging.info("🔐 Récupération du token via client_credentials flow...")
+        result = app.acquire_token_for_client(scopes=SCOPES)
 
-if not result:
-    result = app.acquire_token_for_client(scopes=SCOPES)
-
-if "access_token" not in result:
-    print("❌ Authentification échouée :", result.get("error_description"))
-    exit()
-
-token = result["access_token"]
-headers = {
-    "Authorization": f"Bearer {token}",
-    "Accept": "application/json",
-    "Content-Type": "application/json"
-}
-print("✅ Authentification réussie")
+    if "access_token" in result:
+        logging.info("✅ Authentification réussie.")
+        return result["access_token"]
+    else:
+        logging.error(f"❌ Authentification échouée : {result.get('error_description')}")
+        raise Exception("Impossible d'obtenir un token d'accès")
 
 # -------------------------------
 # MOTS-CLÉS ET DOSSIERS
 # -------------------------------
-keywords = {
+KEYWORDS = {
     "P1": [r"\bp1\b"],
     "P2": [r"\bp2\b", r"\bcertificate\b"],
     "P3": [r"\bp3\b"],
     "P4": [r"\bp4\b"]
 }
 
-compiled_keywords = {
-    folder: [re.compile(pattern, re.IGNORECASE) for pattern in patterns]
-    for folder, patterns in keywords.items()
+COMPILED_KEYWORDS = {
+    folder: [re.compile(pat, re.IGNORECASE) for pat in pats]
+    for folder, pats in KEYWORDS.items()
 }
 
 # -------------------------------
-# FONCTIONS API OUTLOOK (utilise /users/{email})
+# FONCTIONS UTILITAIRES
 # -------------------------------
-BASE_URL = f"https://graph.microsoft.com/v1.0/users/{USER_EMAIL}"
-
-def get_folders():
-    url = f"{BASE_URL}/mailFolders?$top=100"
+def get_folders(headers):
+    url = f"https://graph.microsoft.com/v1.0/users/{USER_ID}/mailFolders?$top=100"
     folders = []
     while url:
-        resp = requests.get(url, headers=headers).json()
-        folders.extend(resp.get("value", []))
-        url = resp.get("@odata.nextLink")
+        resp = requests.get(url, headers=headers)
+        resp.raise_for_status()
+        data = resp.json()
+        folders.extend(data.get("value", []))
+        url = data.get("@odata.nextLink")
     return folders
 
-def get_folder_ids(targets):
+def get_folder_ids(headers, targets):
+    existing = get_folders(headers)
     folder_ids = {}
-    existing = get_folders()
-    for name in targets:
-        match = next((f for f in existing if f["displayName"].lower() == name.lower()), None)
-        if match:
-            folder_ids[name] = match["id"]
+    for f in targets:
+        folder = next((x for x in existing if x["displayName"].lower() == f.lower()), None)
+        if folder:
+            folder_ids[f] = folder["id"]
         else:
-            # Créer le dossier
             resp = requests.post(
-                f"{BASE_URL}/mailFolders",
+                f"https://graph.microsoft.com/v1.0/users/{USER_ID}/mailFolders",
                 headers=headers,
-                json={"displayName": name}
+                json={"displayName": f}
             )
-            resp_json = resp.json()
-
-            if resp.status_code >= 400:
-                print(f"❌ Erreur création dossier '{name}': {resp.status_code}")
-                print(f"🔎 Réponse : {resp_json}")
-                continue
-
-            folder_ids[name] = resp_json.get("id")
+            resp.raise_for_status()
+            folder_ids[f] = resp.json()["id"]
     return folder_ids
 
-def get_emails():
-    url = f"{BASE_URL}/mailFolders/Inbox/messages?$top=100&$orderby=receivedDateTime DESC"
+def get_emails(headers):
+    url = f"https://graph.microsoft.com/v1.0/users/{USER_ID}/mailFolders/Inbox/messages?$top=200&$orderby=receivedDateTime DESC"
     resp = requests.get(url, headers=headers)
+    resp.raise_for_status()
     return resp.json().get("value", [])
 
-def delete_email(mail_id):
-    url = f"{BASE_URL}/messages/{mail_id}"
+def delete_email(headers, mail_id):
+    url = f"https://graph.microsoft.com/v1.0/users/{USER_ID}/messages/{mail_id}"
     resp = requests.delete(url, headers=headers)
     return resp.status_code == 204
 
-def move_email(mail_id, folder_id):
-    url = f"{BASE_URL}/messages/{mail_id}/move"
+def move_email(headers, mail_id, folder_id):
+    url = f"https://graph.microsoft.com/v1.0/users/{USER_ID}/messages/{mail_id}/move"
     resp = requests.post(url, headers=headers, json={"destinationId": folder_id})
     return resp.status_code in (200, 201)
 
 # -------------------------------
-# EXÉCUTION DU TRI
+# TRAITEMENT PRINCIPAL
 # -------------------------------
-folder_ids = get_folder_ids(keywords.keys())
+def handler():
+    token = get_access_token()
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/json",
+        "Content-Type": "application/json"
+    }
 
-emails = get_emails()
-print(f"📨 {len(emails)} emails récupérés")
+    folder_ids = get_folder_ids(headers, KEYWORDS.keys())
+    emails = get_emails(headers)
+    print(f"📨 {len(emails)} emails récupérés")
 
-seen_subjects = set()
-emails_unique = []
+    seen_subjects = set()
+    emails_unique = []
 
-for mail in emails:
-    subject = (mail.get("subject") or "").strip().lower()
-    mail_id = mail["id"]
-
-    if subject in seen_subjects:
-        if delete_email(mail_id):
-            print(f"🗑️ Doublon supprimé : '{subject}'")
+    for mail in emails:
+        subject = (mail.get("subject") or "").strip().lower()
+        mail_id = mail["id"]
+        if subject in seen_subjects:
+            if delete_email(headers, mail_id):
+                print(f"🗑️ Doublon supprimé : '{subject}'")
+            else:
+                print(f"⚠️ Erreur suppression doublon : '{subject}'")
         else:
-            print(f"⚠️ Erreur suppression doublon : '{subject}'")
-    else:
-        seen_subjects.add(subject)
-        emails_unique.append(mail)
+            seen_subjects.add(subject)
+            emails_unique.append(mail)
 
-for mail in emails_unique:
-    subject = (mail.get("subject") or "")
-    mail_id = mail["id"]
-    target_folder = None
+    for mail in emails_unique:
+        subject = mail.get("subject") or ""
+        mail_id = mail["id"]
+        target_folder = None
+        for folder, regex_list in COMPILED_KEYWORDS.items():
+            if any(regex.search(subject) for regex in regex_list):
+                target_folder = folder
+                break
 
-    for folder, regexes in compiled_keywords.items():
-        if any(regex.search(subject) for regex in regexes):
-            target_folder = folder
-            break
-
-    if target_folder:
-        if move_email(mail_id, folder_ids.get(target_folder)):
-            print(f"📌 '{subject}' déplacé vers {target_folder}")
+        if target_folder:
+            if move_email(headers, mail_id, folder_ids[target_folder]):
+                print(f"📌 '{subject}' déplacé vers {target_folder}")
+            else:
+                print(f"⚠️ Erreur déplacement '{subject}'")
         else:
-            print(f"⚠️ Erreur déplacement : '{subject}'")
-    else:
-        print(f"✉️ '{subject}' laissé dans Inbox")
+            print(f"✉️ '{subject}' laissé dans Inbox")
 
-print("✅ Traitement terminé.")
+    print("✅ Tri terminé.")
+
+# Pour test local (optionnel)
+if __name__ == "__main__":
+    handler()
