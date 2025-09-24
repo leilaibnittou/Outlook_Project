@@ -1,0 +1,16 @@
+services:
+  - type: cron
+    name: tri-emails
+    env: python
+    schedule: "*/1 * * * *"  # toutes les minutes
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "python main.py"
+    envVars:
+      - key: CLIENT_ID
+        fromDatabase: false
+      - key: CLIENT_SECRET
+        fromDatabase: false
+      - key: TENANT_ID
+        fromDatabase: false
+      - key: USER_ID
+        fromDatabase: false
