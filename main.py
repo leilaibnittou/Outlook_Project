@@ -2,17 +2,17 @@ import logging
 import requests
 import re
 from msal import ConfidentialClientApplication
+from flask import Flask, jsonify
+import os
 
 # -------------------------------
 # CONFIGURATION
 # -------------------------------
-import os
-
 CLIENT_ID = os.environ["CLIENT_ID"]
 CLIENT_SECRET = os.environ["CLIENT_SECRET"]
 TENANT_ID = os.environ["TENANT_ID"]
 SCOPES = ["https://graph.microsoft.com/.default"]
-USER_ID = "compte_test_projet@outlook.com"  # 👉 À modifier selon le compte cible
+USER_ID = "compte_test_projet@outlook.com"  # 👉 Modifie selon le compte cible
 
 # -------------------------------
 # AUTHENTIFICATION
@@ -111,7 +111,7 @@ def handler():
 
     folder_ids = get_folder_ids(headers, KEYWORDS.keys())
     emails = get_emails(headers)
-    print(f"📨 {len(emails)} emails récupérés")
+    logging.info(f"📨 {len(emails)} emails récupérés")
 
     seen_subjects = set()
     emails_unique = []
@@ -121,9 +121,9 @@ def handler():
         mail_id = mail["id"]
         if subject in seen_subjects:
             if delete_email(headers, mail_id):
-                print(f"🗑️ Doublon supprimé : '{subject}'")
+                logging.info(f"🗑️ Doublon supprimé : '{subject}'")
             else:
-                print(f"⚠️ Erreur suppression doublon : '{subject}'")
+                logging.warning(f"⚠️ Erreur suppression doublon : '{subject}'")
         else:
             seen_subjects.add(subject)
             emails_unique.append(mail)
@@ -139,14 +139,34 @@ def handler():
 
         if target_folder:
             if move_email(headers, mail_id, folder_ids[target_folder]):
-                print(f"📌 '{subject}' déplacé vers {target_folder}")
+                logging.info(f"📌 '{subject}' déplacé vers {target_folder}")
             else:
-                print(f"⚠️ Erreur déplacement '{subject}'")
+                logging.warning(f"⚠️ Erreur déplacement '{subject}'")
         else:
-            print(f"✉️ '{subject}' laissé dans Inbox")
+            logging.info(f"✉️ '{subject}' laissé dans Inbox")
 
-    print("✅ Tri terminé.")
+    logging.info("✅ Tri terminé.")
+    return {"status": "success", "message": "Tri terminé"}
 
-# Pour test local (optionnel)
+# -------------------------------
+# SERVEUR WEB FLASK
+# -------------------------------
+app = Flask(__name__)
+
+@app.route("/")
+def home():
+    return "API Email Sorter is running."
+
+@app.route("/run-script")
+def run_script():
+    try:
+        result = handler()
+        return jsonify(result)
+    except Exception as e:
+        logging.error(f"Erreur lors de l'exécution: {str(e)}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
 if __name__ == "__main__":
-    handler()
+    # Replit attends souvent que Flask écoute sur 0.0.0.0 et le port défini par l'environnement
+    port = int(os.environ.get("PORT", 3000))
+    app.run(host="0.0.0.0", port=port)
